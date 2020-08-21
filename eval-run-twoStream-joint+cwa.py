@@ -7,9 +7,10 @@ import pandas as pd
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
-from makeDatasetRGB import *
-from objectAttentionModelConvLSTM import *
+from makeDatasetTwoStream import *
 from spatial_transforms import (Compose, ToTensor, CenterCrop, Scale, Normalize)
+# from torch.autograd import Variable
+from twoStreamModelCWA import *
 
 
 def getClassNames(dataset_dir):
@@ -36,7 +37,7 @@ def plotConfMatr(conf_matr, dataset, dataset_dir):
     plt.show()
 
 
-def main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize):
+def main_run(dataset, model_state_dict, dataset_dir, stackSize, seqLen, memSize, variant):
     if dataset == 'gtea61':
         num_classes = 61
     elif dataset == 'gtea71':
@@ -50,41 +51,45 @@ def main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize):
     std = [0.229, 0.224, 0.225]
 
     normalize = Normalize(mean=mean, std=std)
+
+    testBatchSize = 1
     spatial_transform = Compose([Scale(256), CenterCrop(224), ToTensor(), normalize])
 
-    vid_seq_test = makeDataset(dataset_dir,
-                               spatial_transform=spatial_transform,
-                               seqLen=seqLen, fmt='.png')
+    vid_seq_test = makeDataset(dataset_dir, spatial_transform=spatial_transform, sequence=False, numSeg=1,
+                               stackSize=stackSize, fmt='.png', phase='Test', seqLen=seqLen)
 
-    test_loader = torch.utils.data.DataLoader(vid_seq_test, batch_size=1,
+    test_loader = torch.utils.data.DataLoader(vid_seq_test, batch_size=testBatchSize,
                                               shuffle=False, num_workers=2, pin_memory=True)
 
-    model = attentionModel(num_classes=num_classes, mem_size=memSize)
-    model.load_state_dict(torch.load(model_state_dict), strict=False)
+    model = twoStreamAttentionModel(variant, stackSize=5, memSize=512, num_classes=num_classes)
+    model.load_state_dict(torch.load(model_state_dict))
 
     for params in model.parameters():
         params.requires_grad = False
 
     model.train(False)
     model.cuda()
+
     test_samples = vid_seq_test.__len__()
     print('Number of samples = {}'.format(test_samples))
     print('Evaluating...')
-    numCorr = 0
-    true_labels = []
+    numCorrTwoStream = 0
+
     predicted_labels = []
+    true_labels = []
     all_predicted = []
-    for j, (inputs, targets) in enumerate(test_loader):
+    for j, (inputFlow, inputFrame, targets) in enumerate(test_loader):
         with torch.no_grad():
-            inputVariable = inputs.permute(1, 0, 2, 3, 4).cuda()
-            output_label, _ = model(inputVariable)
-        _, predicted = torch.max(output_label.data, 1)
+            inputVariableFrame = inputFrame.permute(1, 0, 2, 3, 4).cuda()
+            inputVariableFlow = inputFlow.cuda()
+            output_label = model(inputVariableFlow, inputVariableFrame)
+        _, predictedTwoStream = torch.max(output_label.data, 1)
         all_predicted.append(F.softmax(output_label.data, 1))
-        numCorr += (predicted == targets.cuda()).sum()
+        numCorrTwoStream += (predictedTwoStream == targets.cuda()).sum()
+        predicted_labels.append(predictedTwoStream.cpu())
         true_labels.append(targets)
-        predicted_labels.append(predicted.cpu())
-    test_accuracy = torch.true_divide(numCorr, test_samples) * 100
-    print('Test Accuracy = {}%'.format(test_accuracy))
+    test_accuracyTwoStream = torch.true_divide(numCorrTwoStream, test_samples) * 100
+    print('Accuracy {:.02f}%'.format(test_accuracyTwoStream))
 
     df = pd.DataFrame([], columns=getClassNames(dataset_dir))
     for clss in range(num_classes):
@@ -153,7 +158,7 @@ def main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize):
     # plt.yticks(ticks, fontsize=6)
     # plt.grid(True)
     # plt.clim(0, 1)
-    # plt.savefig(dataset + '-rgb.png', bbox_inches='tight')
+    # plt.savefig(dataset + '-twoStreamJoint.png', bbox_inches='tight')
     # plt.show()
 
 
@@ -162,10 +167,14 @@ def __main__():
     parser.add_argument('--dataset', type=str, default='gtea61', help='Dataset')
     parser.add_argument('--datasetDir', type=str, default='./dataset/gtea_warped_flow_61/split2/test',
                         help='Dataset directory')
-    parser.add_argument('--modelStateDict', type=str, default='./models/gtea61/best_model_state_dict_rgb_split2.pth',
+    parser.add_argument('--modelStateDict', type=str,
+                        default='./models/gtea61/best_model_state_dict_twoStream_split2.pth',
                         help='Model path')
     parser.add_argument('--seqLen', type=int, default=25, help='Length of sequence')
+    parser.add_argument('--stackSize', type=int, default=5, help='Number of optical flow images in input')
     parser.add_argument('--memSize', type=int, default=512, help='ConvLSTM hidden state size')
+    parser.add_argument('--variant', type=str, default=None,
+                        help="Attention mechanism on the candidate memory (c) vs. on the cell state (d)")
 
     args = parser.parse_args()
 
@@ -173,9 +182,11 @@ def __main__():
     model_state_dict = args.modelStateDict
     dataset_dir = args.datasetDir
     seqLen = args.seqLen
+    stackSize = args.stackSize
     memSize = args.memSize
+    variant = args.variant
 
-    main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize)
+    main_run(dataset, model_state_dict, dataset_dir, stackSize, seqLen, memSize, variant)
 
 
 __main__()

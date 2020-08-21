@@ -1,19 +1,19 @@
-import torch
-import resnetMod
-import torch.nn as nn
 from torch.nn import functional as F
+
+import resnetMod
 # from torch.autograd import Variable
-from MyConvLSTMCell import *
+from MyConvLSTMCellCWA import *
 
 
 class attentionModel(nn.Module):
-    def __init__(self, num_classes=61, mem_size=512):
+    def __init__(self, variant, num_classes=61, mem_size=512):
         super(attentionModel, self).__init__()
+        self.variant = variant
         self.num_classes = num_classes
         self.resNet = resnetMod.resnet34(True, True)
         self.mem_size = mem_size
         self.weight_softmax = self.resNet.fc.weight
-        self.lstm_cell = MyConvLSTMCell(512, mem_size)
+        self.lstm_cell = MyConvLSTMCell(512, mem_size, self.variant)
         self.avgpool = nn.AvgPool2d(7)
         self.dropout = nn.Dropout(0.7)
         self.fc = nn.Linear(mem_size, self.num_classes)
@@ -24,8 +24,8 @@ class attentionModel(nn.Module):
 
         self.ss_conv = nn.Conv2d(512, 100, 1)
 
-        self.ss_fc = nn.Linear(100*7*7, 1*7*7)
-       
+        self.ss_fc = nn.Linear(100 * 7 * 7, 1 * 7 * 7)
+        
 
     def forward(self, inputVariable):
         state = (torch.zeros((inputVariable.size(1), self.mem_size, 7, 7)).cuda(),
@@ -36,7 +36,7 @@ class attentionModel(nn.Module):
         for t in range(inputVariable.size(0)):
             logit, feature_conv, feature_convNBN = self.resNet(inputVariable[t])
             bz, nc, h, w = feature_conv.size()
-            feature_conv1 = feature_conv.view(bz, nc, h*w)
+            feature_conv1 = feature_conv.view(bz, nc, h * w)
             probs, idxs = logit.sort(1, True)
             class_idx = idxs[:, 0]
             cam = torch.bmm(self.weight_softmax[class_idx].unsqueeze(1), feature_conv1)
@@ -48,7 +48,7 @@ class attentionModel(nn.Module):
             ss_x = self.ss_conv(attentionFeat)
             ss_x = self.ss_relu(self.ss_bn(ss_x))
             ss_bz, ss_nc, ss_h, ss_w = ss_x.size()
-            ss_x = ss_x.view(ss_bz, ss_nc*ss_h*ss_w)
+            ss_x = ss_x.view(ss_bz, ss_nc * ss_h * ss_w)
             ss_x = self.ss_fc(ss_x)
             ss_x = ss_x.view(ss_bz, -1, ss_h, ss_w)
             

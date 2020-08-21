@@ -8,7 +8,7 @@ import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
 from makeDatasetRGB import *
-from objectAttentionModelConvLSTM import *
+from objectAttentionModelConvLSTMCWA import *
 from spatial_transforms import (Compose, ToTensor, CenterCrop, Scale, Normalize)
 
 
@@ -36,7 +36,7 @@ def plotConfMatr(conf_matr, dataset, dataset_dir):
     plt.show()
 
 
-def main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize):
+def main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize, variant):
     if dataset == 'gtea61':
         num_classes = 61
     elif dataset == 'gtea71':
@@ -59,7 +59,7 @@ def main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize):
     test_loader = torch.utils.data.DataLoader(vid_seq_test, batch_size=1,
                                               shuffle=False, num_workers=2, pin_memory=True)
 
-    model = attentionModel(num_classes=num_classes, mem_size=memSize)
+    model = attentionModel(variant, num_classes=num_classes, mem_size=memSize)
     model.load_state_dict(torch.load(model_state_dict), strict=False)
 
     for params in model.parameters():
@@ -166,6 +166,8 @@ def __main__():
                         help='Model path')
     parser.add_argument('--seqLen', type=int, default=25, help='Length of sequence')
     parser.add_argument('--memSize', type=int, default=512, help='ConvLSTM hidden state size')
+    parser.add_argument('--variant', type=str, default=None,
+                        help="Attention mechanism on the candidate memory (c) vs. on the cell state (d)")
 
     args = parser.parse_args()
 
@@ -174,8 +176,9 @@ def __main__():
     dataset_dir = args.datasetDir
     seqLen = args.seqLen
     memSize = args.memSize
+    variant = args.variant
 
-    main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize)
+    main_run(dataset, model_state_dict, dataset_dir, seqLen, memSize, variant)
 
 
 __main__()
