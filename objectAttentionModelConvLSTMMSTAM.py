@@ -20,10 +20,17 @@ class attentionModel(nn.Module):
         self.classifier = nn.Sequential(self.dropout, self.fc)
 
         self.ss_relu = nn.ReLU()
-        self.ss_conv = nn.Conv2d(512, 100, 1)
         self.ss_bn = nn.BatchNorm2d(100)
+        self.ss_conv = nn.Conv2d(512, 100, 1)
 
         self.ss_fc = nn.Linear(100*7*7, 1*7*7)
+
+        self.GAP1 = nn.AdaptiveAvgPool2d((1,1))
+        self.GAP2 = nn.AdaptiveAvgPool2d((1,1))
+
+        self.fc_att1 = nn.Linear(mem_size*2, mem_size)
+        self.fc_att2 = nn.Linear(mem_size, mem_size)
+
 
     def forward(self, inputVariable):
         state = (torch.zeros((inputVariable.size(1), self.mem_size, 7, 7)).cuda(),
@@ -33,24 +40,26 @@ class attentionModel(nn.Module):
 
         for t in range(inputVariable.size(0)):
             logit, feature_conv, feature_convNBN = self.resNet(inputVariable[t])
-            bz, nc, h, w = feature_conv.size()
-            feature_conv1 = feature_conv.view(bz, nc, h*w)
-            probs, idxs = logit.sort(1, True)
-            class_idx = idxs[:, 0]
-            cam = torch.bmm(self.weight_softmax[class_idx].unsqueeze(1), feature_conv1)
-            attentionMAP = F.softmax(cam.squeeze(1), dim=1)
-            attentionMAP = attentionMAP.view(attentionMAP.size(0), 1, 7, 7)
-            attentionFeat = feature_convNBN * attentionMAP.expand_as(feature_conv)
+            
+
+            visualFeatStat = self.GAP1(feature_convNBN)
+            hiddenStat = self.GAP2(state[0])
+
+            attRaw = torch.cat([visualFeatStat, hiddenStat], dim=1)
+            attRaw = attRaw.view(attRaw.shape[0], attRaw.shape[1])
+
+            attWeights = torch.sigmoid(self.fc_att2(F.relu(self.fc_att1(attRaw))))
+            attentionFeat = feature_conv*attWeights.view(attWeights.shape[0], attWeights.shape[1], 1, 1)
+
             state = self.lstm_cell(attentionFeat, state)
 
-
-            ss_x = self.ss_conv(attentionFeat)
+            ss_x = self.ss_conv(feature_convNBN)
             ss_x = self.ss_relu(self.ss_bn(ss_x))
             ss_bz, ss_nc, ss_h, ss_w = ss_x.size()
             ss_x = ss_x.view(ss_bz, ss_nc*ss_h*ss_w)
             ss_x = self.ss_fc(ss_x)
             ss_x = ss_x.view(ss_bz, -1, ss_h, ss_w)
-            
+            # ss_x = self.ss_softmax(ss_x)
             ss_feats.append(ss_x)
 
         feats1 = self.avgpool(state[1]).view(state[1].size(0), -1)
