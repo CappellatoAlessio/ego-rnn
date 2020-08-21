@@ -1,7 +1,7 @@
 from __future__ import print_function, division
 from flow_resnet import *
 from spatial_transforms import (Compose, ToTensor, CenterCrop, Scale, Normalize)
-from torch.autograd import Variable
+# from torch.autograd import Variable
 from torch.utils.data.sampler import WeightedRandomSampler
 from makeDatasetFlow import *
 from sklearn.metrics import confusion_matrix
@@ -28,7 +28,7 @@ def main_run(dataset, model_state_dict, dataset_dir, stackSize, numSeg):
     spatial_transform = Compose([Scale(256), CenterCrop(224), ToTensor(), normalize])
 
     vid_seq_test = makeDataset(dataset_dir, spatial_transform=spatial_transform, sequence=True,
-                               numSeg=numSeg, stackSize=stackSize, fmt='.jpg', phase='Test')
+                               numSeg=numSeg, stackSize=stackSize, fmt='.png', phase='Test')
 
     test_loader = torch.utils.data.DataLoader(vid_seq_test, batch_size=1,
                             shuffle=False, num_workers=2, pin_memory=True)
@@ -48,14 +48,15 @@ def main_run(dataset, model_state_dict, dataset_dir, stackSize, numSeg):
     predicted_labels = []
 
     for j, (inputs, targets) in enumerate(test_loader):
-        inputVariable = Variable(inputs[0].cuda(), volatile=True)
-        output_label, _ = model(inputVariable)
+        with torch.no_grad():
+            inputVariable = inputs[0].cuda()
+            output_label, _ = model(inputVariable)
         output_label_mean = torch.mean(output_label.data, 0, True)
         _, predicted = torch.max(output_label_mean, 1)
         numCorr += (predicted == targets[0]).sum()
         true_labels.append(targets)
-        predicted_labels.append(predicted)
-    test_accuracy = (numCorr / test_samples) * 100
+        predicted_labels.append(predicted.cpu())
+    test_accuracy = torch.true_divide(numCorr, test_samples) * 100
     print('Test Accuracy  = {}%'.format(test_accuracy))
 
     cnf_matrix = confusion_matrix(true_labels, predicted_labels).astype(float)
@@ -68,7 +69,7 @@ def main_run(dataset, model_state_dict, dataset_dir, stackSize, numSeg):
     plt.yticks(ticks, fontsize=6)
     plt.grid(True)
     plt.clim(0, 1)
-    plt.savefig(dataset + '-flow.jpg', bbox_inches='tight')
+    plt.savefig(dataset + '-flow.png', bbox_inches='tight')
     plt.show()
 
 def __main__():

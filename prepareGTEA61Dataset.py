@@ -36,8 +36,8 @@ for label_file in sorted(label_files):
             end_frame = line1[f2+1:f3]
             frame_ind = 0
             for f in range(int(start_frame), int(end_frame)+1):
-                frame_name = src_img_dir + '/' + label_file[:-4] + '/' + str(f).zfill(5) + '.jpg'
-                cmd = 'cp ' + frame_name + ' ' + des_dir + '/image_' + str(frame_ind).zfill(5) + '.jpg'
+                frame_name = src_img_dir + '/' + label_file[:-4] + '/' + str(f).zfill(5) + '.png'
+                cmd = 'cp ' + frame_name + ' ' + des_dir + '/rgb' + str(frame_ind).zfill(4) + '.png'
                 os.system(cmd)
                 frame_ind += 1
 

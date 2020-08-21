@@ -2,7 +2,7 @@ from __future__ import print_function, division
 from flow_resnet import *
 from objectAttentionModelConvLSTM import *
 from spatial_transforms import (Compose, ToTensor, CenterCrop, Scale, Normalize)
-from torch.autograd import Variable
+# from torch.autograd import Variable
 from torch.utils.data.sampler import WeightedRandomSampler
 from makeDatasetTwoStream import *
 from sklearn.metrics import confusion_matrix
@@ -32,7 +32,7 @@ def main_run(dataset, flowModel_state_dict, RGBModel_state_dict, dataset_dir, st
     spatial_transform = Compose([Scale(256), CenterCrop(224), ToTensor(), normalize])
 
     vid_seq_test = makeDataset(dataset_dir, spatial_transform=spatial_transform, sequence=sequence, numSeg=numSeg,
-                               stackSize=stackSize, fmt='.jpg', phase='Test', seqLen=seqLen)
+                               stackSize=stackSize, fmt='.png', phase='Test', seqLen=seqLen)
 
     test_loader = torch.utils.data.DataLoader(vid_seq_test, batch_size=testBatchSize,
                             shuffle=False, num_workers=2, pin_memory=True)
@@ -62,17 +62,18 @@ def main_run(dataset, flowModel_state_dict, RGBModel_state_dict, dataset_dir, st
     predicted_labels = []
 
     for j, (inputFlow, inputFrame, targets) in enumerate(test_loader):
-        inputVariableFlow = Variable(inputFlow[0].cuda(), volatile=True)
-        inputVariableFrame = Variable(inputFrame.permute(1, 0, 2, 3, 4).cuda(), volatile=True)
-        output_labelFlow, _ = modelFlow(inputVariableFlow)
-        output_labelFrame, _ = modelRGB(inputVariableFrame)
+        with torch.no_grad():
+            inputVariableFlow = inputFlow[0].cuda()
+            inputVariableFrame = inputFrame.permute(1, 0, 2, 3, 4).cuda()
+            output_labelFlow, _ = modelFlow(inputVariableFlow)
+            output_labelFrame, _ = modelRGB(inputVariableFrame)
         output_label_meanFlow = torch.mean(output_labelFlow.data, 0, True)
         output_label_meanTwoStream = (flow_wt * output_label_meanFlow) + ((1-flow_wt) * output_labelFrame.data)
         _, predictedTwoStream = torch.max(output_label_meanTwoStream, 1)
         numCorrTwoStream += (predictedTwoStream == targets[0]).sum()
         true_labels.append(targets)
-        predicted_labels.append(predictedTwoStream)
-    test_accuracyTwoStream = (numCorrTwoStream / test_samples) * 100
+        predicted_labels.append(predictedTwoStream.cpu())
+    test_accuracyTwoStream = torch.true_divide(numCorrTwoStream, test_samples) * 100
     print('Test Accuracy = {}'.format(test_accuracyTwoStream))
 
     cnf_matrix = confusion_matrix(true_labels, predicted_labels).astype(float)
@@ -85,7 +86,7 @@ def main_run(dataset, flowModel_state_dict, RGBModel_state_dict, dataset_dir, st
     plt.yticks(ticks, fontsize=6)
     plt.grid(True)
     plt.clim(0, 1)
-    plt.savefig(dataset + '-twoStream.jpg', bbox_inches='tight')
+    plt.savefig(dataset + '-twoStream.png', bbox_inches='tight')
     plt.show()
 
 def __main__():

@@ -4,7 +4,7 @@ from spatial_transforms import (Compose, ToTensor, CenterCrop, Scale, Normalize,
 from tensorboardX import SummaryWriter
 import torch.nn as nn
 from twoStreamModel import *
-from torch.autograd import Variable
+# from torch.autograd import Variable
 from torch.utils.data.sampler import WeightedRandomSampler
 from makeDatasetTwoStream import *
 import argparse
@@ -52,7 +52,7 @@ def main_run(dataset, flowModel, rgbModel, stackSize, seqLen, memSize, trainData
                                  ToTensor(), normalize])
 
     vid_seq_train = makeDataset(trainDatasetDir,spatial_transform=spatial_transform,
-                               sequence=False, numSeg=1, stackSize=stackSize, fmt='.jpg', seqLen=seqLen)
+                               sequence=False, numSeg=1, stackSize=stackSize, fmt='.png', seqLen=seqLen)
 
     train_loader = torch.utils.data.DataLoader(vid_seq_train, batch_size=trainBatchSize,
                             shuffle=True, num_workers=4, pin_memory=True)
@@ -61,7 +61,7 @@ def main_run(dataset, flowModel, rgbModel, stackSize, seqLen, memSize, trainData
 
         vid_seq_val = makeDataset(valDatasetDir,
                                    spatial_transform=Compose([Scale(256), CenterCrop(224), ToTensor(), normalize]),
-                                   sequence=False, numSeg=1, stackSize=stackSize, fmt='.jpg', phase='Test',
+                                   sequence=False, numSeg=1, stackSize=stackSize, fmt='.png', phase='Test',
                                    seqLen=seqLen)
 
         val_loader = torch.utils.data.DataLoader(vid_seq_val, batch_size=valBatchSize,
@@ -133,7 +133,6 @@ def main_run(dataset, flowModel, rgbModel, stackSize, seqLen, memSize, trainData
     train_iter = 0
 
     for epoch in range(numEpochs):
-        optim_scheduler.step()
         epoch_loss = 0
         numCorrTrain = 0
         iterPerEpoch = 0
@@ -143,18 +142,18 @@ def main_run(dataset, flowModel, rgbModel, stackSize, seqLen, memSize, trainData
             train_iter += 1
             iterPerEpoch += 1
             optimizer_fn.zero_grad()
-            inputVariableFlow = Variable(inputFlow.cuda())
-            inputVariableFrame = Variable(inputFrame.permute(1, 0, 2, 3, 4).cuda())
-            labelVariable = Variable(targets.cuda())
+            inputVariableFlow = inputFlow.cuda()
+            inputVariableFrame = inputFrame.permute(1, 0, 2, 3, 4).cuda()
+            labelVariable = targets.cuda()
             output_label = model(inputVariableFlow, inputVariableFrame)
             loss = loss_fn(F.log_softmax(output_label, dim=1), labelVariable)
             loss.backward()
             optimizer_fn.step()
             _, predicted = torch.max(output_label.data, 1)
             numCorrTrain += (predicted == targets.cuda()).sum()
-            epoch_loss += loss.data[0]
+            epoch_loss += loss.item()
         avg_loss = epoch_loss / iterPerEpoch
-        trainAccuracy = (numCorrTrain / trainSamples) * 100
+        trainAccuracy = torch.true_divide(numCorrTrain, trainSamples) * 100
         print('Average training loss after {} epoch = {} '.format(epoch + 1, avg_loss))
         print('Training accuracy after {} epoch = {}% '.format(epoch + 1, trainAccuracy))
         writer.add_scalar('train/epoch_loss', avg_loss, epoch + 1)
@@ -169,15 +168,15 @@ def main_run(dataset, flowModel, rgbModel, stackSize, seqLen, memSize, trainData
                 numCorr = 0
                 for j, (inputFlow, inputFrame, targets) in enumerate(val_loader):
                     val_iter += 1
-                    inputVariableFlow = Variable(inputFlow.cuda())
-                    inputVariableFrame = Variable(inputFrame.permute(1, 0, 2, 3, 4).cuda())
-                    labelVariable = Variable(targets.cuda())
+                    inputVariableFlow = inputFlow.cuda()
+                    inputVariableFrame = inputFrame.permute(1, 0, 2, 3, 4).cuda()
+                    labelVariable = targets.cuda()
                     output_label = model(inputVariableFlow, inputVariableFrame)
                     loss = loss_fn(F.log_softmax(output_label, dim=1), labelVariable)
-                    val_loss_epoch += loss.data[0]
+                    val_loss_epoch += loss.item()
                     _, predicted = torch.max(output_label.data, 1)
                     numCorr += (predicted == labelVariable.data).sum()
-                val_accuracy = (numCorr / valSamples) * 100
+                val_accuracy = torch.true_divide(numCorr, valSamples) * 100
                 avg_val_loss = val_loss_epoch / val_iter
                 print('Val Loss after {} epochs, loss = {}'.format(epoch + 1, avg_val_loss))
                 print('Val Accuracy after {} epochs = {}%'.format(epoch + 1, val_accuracy))
@@ -193,6 +192,7 @@ def main_run(dataset, flowModel, rgbModel, stackSize, seqLen, memSize, trainData
             if (epoch + 1) % 10 == 0:
                 save_path_model = (model_folder + '/model_twoStream_state_dict_epoch' + str(epoch + 1) + '.pth')
                 torch.save(model.state_dict(), save_path_model)
+        optim_scheduler.step()
     train_log_loss.close()
     train_log_acc.close()
     val_log_acc.close()
